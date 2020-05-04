@@ -4,7 +4,7 @@ import random
 import cv2
 from os.path import isfile, join
 from os import listdir
-from utilities import labels as lb
+from utilities.labels import LABELS, LABELS_MAPPING
 import os
 import wfdb
 import numpy as np
@@ -93,9 +93,9 @@ def create_img_from_sign(size=(128, 128), augmentation=True):
         ann = wfdb.rdann(_directory + file, extension='atr')
         for i in tqdm.tqdm(range(1, len(ann.sample) - 1)):
 
-            if ann.symbol[i] not in lb.original_labels:
+            if ann.symbol[i] not in LABELS_MAPPING:
                 continue
-            label = lb.original_labels[ann.symbol[i]]
+            label = LABELS_MAPPING[ann.symbol[i]]
             if file in train:
                 dir = '{}train/{}'.format(_dataset_dir, label)
             else:
@@ -150,9 +150,9 @@ def create_img_from_sign_filtered(size=(128, 128), size_paa=100, augmentation=Tr
         ann = wfdb.rdann(_directory + file, extension='atr')
         for i in tqdm.tqdm(range(1, len(ann.sample) - 1)):
 
-            if ann.symbol[i] not in lb.original_labels:
+            if ann.symbol[i] not in LABELS_MAPPING:
                 continue
-            label = lb.original_labels[ann.symbol[i]]
+            label = LABELS_MAPPING[ann.symbol[i]]
             ''' Get the Q-peak intervall '''
             start = ann.sample[i - 1] + _range_to_ignore
             end = ann.sample[i + 1] - _range_to_ignore
@@ -194,9 +194,9 @@ def create_json_from_sign_filtered(size_paa=100):
         ann = wfdb.rdann(_directory + file, extension='atr')
         for i in range(1, len(ann.sample) - 1):
 
-            if ann.symbol[i] not in lb.original_labels:
+            if ann.symbol[i] not in LABELS_MAPPING:
                 continue
-            label = lb.original_labels[ann.symbol[i]]
+            label = LABELS_MAPPING[ann.symbol[i]]
 
             ''' Get the Q-peak intervall '''
             start = ann.sample[i - 1] + _range_to_ignore
@@ -244,7 +244,7 @@ def load_files(directory):
     validation = []
     test = []
 
-    classes = {'NOR', 'PVC', 'PAB', 'LBB', 'RBB', 'APC', 'VFW', 'VEB'}
+    classes = set(LABELS)
 
     classes_dict = dict()
 

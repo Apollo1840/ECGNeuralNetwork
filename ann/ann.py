@@ -5,7 +5,7 @@ from graphics.train_val_tensorboard import TrainValTensorBoard
 from keras import Sequential
 from dataset import dataset
 from graphics import confusion_matrix as cm
-from utilities import labels as lbs
+from utilities.labels import LABELS
 import numpy as np
 
 _dataset_dir = '../Data/dataset_ann/'
@@ -37,21 +37,24 @@ def load_ann_model():
     return model
 
 
-def encode_label(file):
+def encode_label(filename):
     """
         Encode the class label
-        :param file:
-        :return:
+        :param filename: str. filename[:3] is the label name
+        :return: onehot of the label
     """
     label = [0 for _ in range(_n_classes)]
-    label[int(lbs.labels[file[:3]])] = 1
+    label[int(LABELS.index(filename[:3]))] = 1
     return label
 
 
 def load_sequence(files, directory, encode_labels=True):
     """
         Convert an image to array and encode its label
-        :param files:
+
+        :param files: List[str], filenames, filename[:3] is the label name
+        :param directory: str
+        :param encode_labels: Bool
         :return: image converted and its label
     """
     sequences = []
@@ -61,7 +64,7 @@ def load_sequence(files, directory, encode_labels=True):
         if encode_labels:
             label = encode_label(file)
         else:
-            label = lbs.labels[file[:3]]
+            label = LABELS.index(file[:3])
         with open(file_name, 'r') as f:
             sequence = f.read().split(',')
         sequences.append(sequence)
@@ -126,12 +129,15 @@ def training(train=None, validation=None):
         callbacks=callbacks_list)
 
 
-def predict_model(model=None, test=None):
+def predict_model(model=None, filenames=None):
     """
         Predict model
+
+        :param model: keras.model
+        :param filenames: List[str], list of test filenames
         :return:
     """
-    x, y = load_sequence(test, _dataset_dir)
+    x, _ = load_sequence(filenames, _dataset_dir)
     y = model.predict(x)
 
     return y
