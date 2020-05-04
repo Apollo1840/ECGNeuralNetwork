@@ -1,13 +1,14 @@
-import matplotlib.pyplot as plt
 import tqdm
 import random
-import cv2
+random.seed(2020)
+
 from os.path import isfile, join
 from os import listdir
 from utilities.labels import LABELS, LABELS_MAPPING
 import os
 import wfdb
 import numpy as np
+from .data_transform import signal_to_im2
 
 _range_to_ignore = 20
 _directory = '../Data/mitbih/'
@@ -20,201 +21,112 @@ _width = 2503
 _height = 3361
 
 
-def cropping(image, filename, size):
-    """
-        :param image: the image to crop
-        :param filename:
-        :param size: prefered size
-        :return:
-    """
-    # Left Top Crop
-    crop = image[:96, :96]
-    crop = cv2.resize(crop, size)
-    cv2.imwrite(filename[:-5] + '1' + '.png', crop)
-
-    # Center Top Crop
-    crop = image[:96, 16:112]
-    crop = cv2.resize(crop, size)
-    cv2.imwrite(filename[:-5] + '2' + '.png', crop)
-
-    # Right Top Crop
-    crop = image[:96, 32:]
-    crop = cv2.resize(crop, size)
-    cv2.imwrite(filename[:-5] + '3' + '.png', crop)
-
-    # Left Center Crop
-    crop = image[16:112, :96]
-    crop = cv2.resize(crop, size)
-    cv2.imwrite(filename[:-5] + '4' + '.png', crop)
-
-    # Center Center Crop
-    crop = image[16:112, 16:112]
-    crop = cv2.resize(crop, size)
-    cv2.imwrite(filename[:-5] + '5' + '.png', crop)
-
-    # Right Center Crop
-    crop = image[16:112, 32:]
-    crop = cv2.resize(crop, size)
-    cv2.imwrite(filename[:-5] + '6' + '.png', crop)
-
-    # Left Bottom Crop
-    crop = image[32:, :96]
-    crop = cv2.resize(crop, size)
-    cv2.imwrite(filename[:-5] + '7' + '.png', crop)
-
-    # Center Bottom Crop
-    crop = image[32:, 16:112]
-    crop = cv2.resize(crop, size)
-    cv2.imwrite(filename[:-5] + '8' + '.png', crop)
-
-    # Right Bottom Crop
-    crop = image[32:, 32:]
-    crop = cv2.resize(crop, size)
-    cv2.imwrite(filename[:-5] + '9' + '.png', crop)
-
-
-def create_img_from_sign(size=(128, 128), augmentation=True):
+def create_img_from_dir(size=(128, 128), augmentation=True, smoothing=True):
     """
        For each beat for each patient creates img apply some filters
-       :param size: the img size
-       :param augmentation: create for each image another nine for each side
+       :param size: tuple of int, the img size
+       :param augmentation: Bool, create for each image another nine for each side
+       :param smoothing: Bool
     """
-    if not os.path.exists(_directory):
-        os.makedirs(_directory)
 
-    files = [f[:-4] for f in listdir(_directory) if isfile(join(_directory, f)) if (f.find('.dat') != -1)]
+    prepare_data_pathes()
 
-    random.shuffle(files)
-    train = files[: int(len(files) * _split_percentage)]
-    test = files[int(len(files) * _split_percentage):]
+    records = [f[:-4] for f in listdir(_directory) if isfile(join(_directory, f)) if (f.find('.dat') != -1)]
+    random.shuffle(records)
 
-    for file in files:
-        sig, _ = wfdb.rdsamp(_directory + file)
-        ann = wfdb.rdann(_directory + file, extension='atr')
+    train = records[: int(len(records) * _split_percentage)]
+    # test = records[int(len(records) * _split_percentage):]
+
+    for record in records:
+        if record in train:
+            filename_convention = '{}train/{}/{}_{}{}{}0.png'
+        else:
+            filename_convention = '{}validation/{}/{}_{}{}{}0.png'
+
+        sig, _ = wfdb.rdsamp(_directory + record)
+        ann = wfdb.rdann(_directory + record, extension='atr')
+
+        # loop through all beats
         for i in tqdm.tqdm(range(1, len(ann.sample) - 1)):
 
             if ann.symbol[i] not in LABELS_MAPPING:
                 continue
-            label = LABELS_MAPPING[ann.symbol[i]]
-            if file in train:
-                dir = '{}train/{}'.format(_dataset_dir, label)
-            else:
-                dir = '{}validation/{}'.format(_dataset_dir, label)
-            if not os.path.exists(dir):
-                os.makedirs(dir)
 
+            # get beat
             ''' Get the Q-peak intervall '''
+            id_lead = 0
             start = ann.sample[i - 1] + _range_to_ignore
             end = ann.sample[i + 1] - _range_to_ignore
+            beat = [sig[j][id_lead] for j in range(start, end)]
 
-            ''' Get the signals '''
-            plot_x = [sig[i][0] for i in range(start, end)]
-            plot_y = [i * 1 for i in range(start, end)]
+            if smoothing:
+                beat = piecewise_aggregate_approximation(beat, paa_dim=100)
 
-            ''' Plot and save the beat'''
-            fig = plt.figure(frameon=False)
-            plt.plot(plot_y, plot_x)
-            plt.xticks([]), plt.yticks([])
-            for spine in plt.gca().spines.values():
-                spine.set_visible(False)
+            # get filename by label
+            label = LABELS_MAPPING[ann.symbol[i]]
+            filename = filename_convention.format(_dataset_dir, label, label, record[-3:], start, end)
 
             ''' Convert in gray scale and resize img '''
-            if file in train:
-                filename = '{}train/{}/{}_{}{}{}0.png'.format(_dataset_dir, label, label, file[-3:], start, end)
-            else:
-                filename = '{}validation/{}/{}_{}{}{}0.png'.format(_dataset_dir, label, label, file[-3:], start, end)
-            fig.savefig(filename)
-            im_gray = cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
-            im_gray = cv2.resize(im_gray, size, interpolation=cv2.INTER_LANCZOS4)
-            cv2.imwrite(filename, im_gray)
-            if augmentation:
-                cropping(im_gray, filename, size)
-            plt.cla()
-            plt.clf()
-            plt.close('all')
+            signal_to_im2(beat, filename, resize=size, use_cropping=augmentation)
 
 
-def create_img_from_sign_filtered(size=(128, 128), size_paa=100, augmentation=True):
-    """
-        For each beat for each patient creates img apply some filters
-        :param size: the img size
-        :param augmentation: create for each image another nine for each side
-    """
-    if not os.path.exists(_directory):
-        os.makedirs(_directory)
+def create_txt_from_dir(smoothing=True):
 
-    files = [f[:-4] for f in listdir(_directory) if isfile(join(_directory, f)) if (f.find('.dat') != -1)]
+    prepare_data_pathes()
 
-    for file in files:
-        sig, _ = wfdb.rdsamp(_directory + file)
-        ann = wfdb.rdann(_directory + file, extension='atr')
+    records = [f[:-4] for f in listdir(_directory) if isfile(join(_directory, f)) if (f.find('.dat') != -1)]
+    random.shuffle(records)
+
+    train = records[: int(len(records) * _split_percentage)]
+    # test = records[int(len(records) * _split_percentage):]
+
+    for record in records:
+        if record in train:
+            filename_convention = '{}train/{}/{}_{}{}{}.txt'
+        else:
+            filename_convention = '{}validation/{}/{}_{}{}{}.txt'
+
+        sig, _ = wfdb.rdsamp(_directory + record)
+        ann = wfdb.rdann(_directory + record, extension='atr')
+
+        # loop through all beats
         for i in tqdm.tqdm(range(1, len(ann.sample) - 1)):
 
             if ann.symbol[i] not in LABELS_MAPPING:
                 continue
-            label = LABELS_MAPPING[ann.symbol[i]]
+
+            # get beat
             ''' Get the Q-peak intervall '''
+            id_lead = 0
             start = ann.sample[i - 1] + _range_to_ignore
             end = ann.sample[i + 1] - _range_to_ignore
+            beat = [sig[j][id_lead] for j in range(start, end)]
 
-            signal = [sig[i][0] for i in range(start, end)]
-            paa = piecewise_aggregate_approximation(signal, size_paa)
-            plot_x = paa
-            plot_y = [i for i in range(len(paa))]
-            ''' Plot and save the beat'''
-            fig = plt.figure(frameon=False)
-            plt.plot(plot_y, plot_x)
-            plt.xticks([]), plt.yticks([])
-            for spine in plt.gca().spines.values():
-                spine.set_visible(False)
+            if smoothing:
+                beat = piecewise_aggregate_approximation(beat, paa_dim=100)
 
-            filename = '{}{}_{}{}{}0.png'.format(_dataset_dir, label, file[-3:], start, end)
-            fig.savefig(filename, bbox_inches='tight')
-            im_gray = cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
-            im_gray = cv2.resize(im_gray, size, interpolation=cv2.INTER_LANCZOS4)
-            cv2.imwrite(filename, im_gray)
-            plt.cla()
-            plt.clf()
-            plt.close('all')
-
-
-def create_json_from_sign_filtered(size_paa=100):
-    """
-        For each beat for each patient creates img apply some filters
-        :param size_paa: the new vector size
-    """
-    if not os.path.exists(_directory):
-        os.makedirs(_directory)
-
-    files = [f[:-4] for f in listdir(_directory) if isfile(join(_directory, f)) if (f.find('.dat') != -1)]
-
-    for f in tqdm.tqdm(range(len(files))):
-        file = files[f]
-        sig, _ = wfdb.rdsamp(_directory + file)
-        ann = wfdb.rdann(_directory + file, extension='atr')
-        for i in range(1, len(ann.sample) - 1):
-
-            if ann.symbol[i] not in LABELS_MAPPING:
-                continue
+            # get filename by label
             label = LABELS_MAPPING[ann.symbol[i]]
+            filename = filename_convention.format(_dataset_ann_dir, label, label, record[-3:], start, end)
 
-            ''' Get the Q-peak intervall '''
-            start = ann.sample[i - 1] + _range_to_ignore
-            end = ann.sample[i + 1] - _range_to_ignore
+            signal_to_txt(beat, filename)
 
-            signal = [sig[i][0] for i in range(start, end)]
-            paa = piecewise_aggregate_approximation(signal, size_paa)
-            filename = '{}{}_{}{}{}.txt'.format(_dataset_ann_dir, label, file[-3:], start, end)
-            with open(filename, 'w+') as f:
-                for i, item in enumerate(paa):
-                    f.write("%s" % item)
-                    if i < len(paa) - 1:
-                        f.write(", ")
+
+def prepare_data_pathes():
+    for label in LABELS:
+        dir = '{}train/{}'.format(_dataset_dir, label)
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+
+        dir = '{}validation/{}'.format(_dataset_dir, label)
+        if not os.path.exists(dir):
+            os.makedirs(dir)
 
 
 def piecewise_aggregate_approximation(vector, paa_dim: int):
     '''
         Transform signals in a vector of size M
+
         :param vector: signals
         :param paa_dim: the new size
         :return:
@@ -234,6 +146,14 @@ def piecewise_aggregate_approximation(vector, paa_dim: int):
     return res
 
 
+def signal_to_txt(sig, txt_path):
+    with open(txt_path, 'w+') as f:
+        for i, item in enumerate(sig):
+            f.write("%s" % item)
+            if i < len(sig) - 1:
+                f.write(", ")
+
+
 def load_files(directory):
     """
         Load each name file in the directory
@@ -245,7 +165,6 @@ def load_files(directory):
     test = []
 
     classes = set(LABELS)
-
     classes_dict = dict()
 
     for key in classes:
