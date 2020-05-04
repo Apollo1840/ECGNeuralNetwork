@@ -2,7 +2,7 @@
 *.csv
 *.mat
 *.hea
-.idea/*
+# .idea/*
 **/__pycache__/**
 **/.ipynb_checkpoints/**
 trained_model/**
