@@ -11,3 +11,4 @@ biosppy
 wfdb
 tqdm
 imutils
+matplotlib

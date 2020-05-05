@@ -108,3 +108,18 @@ def cropping2(image, filename, size):
     crop = cv2.resize(crop, size)
     cv2.imwrite(filename[:-5] + '9' + '.png', crop)
 
+
+def augmentated_filenames2(filenames):
+    """
+    cropping() first to understand this function
+
+    :param filenames: List[str]
+    :return:
+    """
+
+    res_filenames = []
+    for filename in filenames:
+        res_filenames.extend([filename[:-5] + str(i) + '.png' for i in range(10)])
+
+    return res_filenames
+

@@ -11,10 +11,12 @@ from graphics import confusion_matrix as cm
 import numpy as np
 import random
 import cv2
+import os
 import imutils
+from dataset.data_augmentation import augmentated_filenames2
 
-_dataset_dir = '../Data/dataset_filtered/'
-_model = '../Models/cnn.h5'
+_dataset_dir = './data/beats_img'
+_model = './trained_models/cnn_baseline.h5'
 
 _train_files = 71207
 _validation_files = 36413
@@ -22,7 +24,7 @@ _rotate_range = 180
 _size = (64, 64)
 _batch_size = 32
 _filters = (4, 4)
-_epochs = 30
+_epochs = 3
 _n_classes = 8
 _regularizers = 0.0001
 
@@ -96,20 +98,66 @@ def encode_label(file):
     return label
 
 
-def images2array(files, size, directory, random_rotate, flip, encode_labels=True):
+def steps(files, batch_size):
+    """
+        Calculate the number steps necessary to process each files
+        :param files:
+        :param batch_size:
+        :return: the numbers of files divided to batch
+    """
+    return len(files) / batch_size
+
+
+def load_dataset(files, directory,
+                 batch_size, size,
+                 random_crop,
+                 random_rotate,
+                 flip):
+    """
+        Load dataset in minibatch
+        :param files: List[str], each file is xxx.png
+        :param directory: str
+        :param batch_size: int
+        :param size: int
+        :param random_crop: Bool, no effect in this case
+        :return:
+    """
+
+    L = len(files)
+
+    # this line is just to make the generator infinite, keras needs that
+    while True:
+        batch_start = 0
+        batch_end = batch_size
+        while batch_start < L:
+            limit = min(batch_end, L)
+            X, Y = images2array(files[batch_start:limit], size, directory, random_rotate, flip)
+            yield (X, Y)
+
+            batch_start += batch_size
+            batch_end += batch_size
+
+
+def images2array(files,
+                 size,
+                 directory,
+                 random_rotate,
+                 flip,
+                 encode_labels=True):
     """
         Convert an image to array and encode its label
 
-        :param files:
+        :param files: str. eg. xxx.png
         :param size:
         :param directory:
         :return: image converted and its label
     """
+
     images = []
     labels = []
     for file in files:
-        file_name = directory + '/' + file
-        img = image2array(file_name, size, random_rotate, flip)
+        file_name = os.path.join(directory, file[:3], file)
+        img = image_to_array(file_name, size, random_rotate, flip)
 
         if encode_labels:
             label = encode_label(file)
@@ -125,7 +173,16 @@ def images2array(files, size, directory, random_rotate, flip, encode_labels=True
     return X, Y
 
 
-def image2array(filename, size, random_rotate, flip):
+def image_to_array(filename, size, random_rotate=True, flip=True):
+    """
+
+    :param filename:
+    :param size:
+    :param random_rotate:
+    :param flip:
+    :return: np.array
+    """
+
     img = cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
     if random_rotate:
         if random.uniform(0, 1) < _probability_to_change:
@@ -133,45 +190,13 @@ def image2array(filename, size, random_rotate, flip):
     if flip:
         if random.uniform(0, 1) < _probability_to_change:
             img = cv2.flip(img, randint(-1, 1))
-    img = cv2.resize(img, size, interpolation=cv2.INTER_LANCZOS4)
+    if size:
+        img = cv2.resize(img, size, interpolation=cv2.INTER_LANCZOS4)
+
     img = img.astype('float64')
     img /= 255
     img = np.reshape(img, [size[0], size[1], 1])
     return img
-
-
-def steps(files, batch_size):
-    """
-        Calculate the number steps necessary to process each files
-        :param files:
-        :param batch_size:
-        :return: the numbers of files divided to batch
-    """
-    return len(files) / batch_size
-
-
-def load_dataset(files, directory, batch_size, size, random_crop, random_rotate, flip):
-    """
-        Load dataset in minibatch
-        :param directory: str
-        :param batch_size: int
-        :param size: int
-        :return:
-    """
-
-    L = len(files)
-
-    # this line is just to make the generator infinite, keras needs that
-    while True:
-        batch_start = 0
-        batch_end = batch_size
-        while batch_start < L:
-            limit = min(batch_end, L)
-            X, Y = images2array(files[batch_start:limit], size, directory, random_crop, random_rotate, flip)
-            yield (X, Y)
-
-            batch_start += batch_size
-            batch_end += batch_size
 
 
 def training(train=None, validation=None, augmentation=True):
@@ -183,15 +208,20 @@ def training(train=None, validation=None, augmentation=True):
     if train is None and validation is None:
         train, validation, test = dataset.load_files(_dataset_dir)
 
+    if augmentation:
+        train = augmentated_filenames2(train)
+
     callbacks_list = [ModelCheckpoint(_model, monitor='val_loss', save_best_only=True),
                       TrainValTensorBoard(write_graph=False)]
 
-    data_gen_train = load_dataset(train, _dataset_dir, _batch_size, _size,
+    data_gen_train = load_dataset(train, _dataset_dir,
+                                  _batch_size, _size,
                                   random_crop=augmentation,
                                   random_rotate=augmentation,
                                   flip=augmentation)
 
-    data_gen_valid = load_dataset(validation, _dataset_dir, _batch_size, _size,
+    data_gen_valid = load_dataset(validation, _dataset_dir,
+                                  _batch_size, _size,
                                   random_crop=augmentation,
                                   random_rotate=augmentation,
                                   flip=augmentation)
@@ -202,6 +232,8 @@ def training(train=None, validation=None, augmentation=True):
                         validation_data=data_gen_valid,
                         validation_steps=steps(validation, _batch_size),
                         callbacks=callbacks_list)
+
+    return model
 
 
 def predict_model(model=None, filenames=None):

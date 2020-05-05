@@ -121,10 +121,13 @@ def training(train=None, validation=None):
     callbacks_list = [ModelCheckpoint(_model, monitor='val_loss', save_best_only=True),
                       TrainValTensorBoard(write_graph=False)]
 
+    data_gen_train = load_dataset(train, _dataset_dir, _batch_size)
+    data_gen_valid = load_dataset(validation, _dataset_dir, _batch_size)
+
     model.fit_generator(
-        load_dataset(train, _dataset_dir, _batch_size),
+        data_gen_train,
         steps_per_epoch=steps(train, _batch_size), epochs=_epochs,
-        validation_data=load_dataset(validation, _dataset_dir, _batch_size),
+        validation_data=data_gen_valid,
         validation_steps=steps(validation, _batch_size),
         callbacks=callbacks_list)
 
