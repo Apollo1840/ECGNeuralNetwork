@@ -61,7 +61,7 @@ def create_img_from_dir(
     """
 
     # prepare data_pathes
-    prepare_data_pathes(save_dir, split_tvt=False)
+    prepare_data_pathes(save_dir, labels=labels_mapping.values(), split_tvt=False)
 
     records = records_to_process(data_dir, records_wanted)
 
@@ -334,10 +334,10 @@ def load_data(data_filename,
     return data
 
 
-def prepare_data_pathes(save_dir, split_tvt=True):
+def prepare_data_pathes(save_dir, labels, split_tvt=True):
 
     if split_tvt:
-        for label in LABELS:
+        for label in labels:
             dir = '{}train/{}'.format(save_dir, label)
             if not os.path.exists(dir):
                 os.makedirs(dir)
@@ -350,7 +350,7 @@ def prepare_data_pathes(save_dir, split_tvt=True):
             if not os.path.exists(dir):
                 os.makedirs(dir)
     else:
-        for label in LABELS:
+        for label in labels:
             dir = '{}/{}'.format(save_dir, label)
             if not os.path.exists(dir):
                 os.makedirs(dir)

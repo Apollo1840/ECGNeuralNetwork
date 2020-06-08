@@ -68,6 +68,6 @@ def evaluate_cnn(model, label_type, keep_ratio=1, verbose=True):
     print("f1score: ", fscore)
 
     print("marco f1 score", f1_score(y_true, y_pred, average='macro'))
-    print(classification_report(y_true, y_pred, target_names=AAMI_LABELS[:3]))
+    print(classification_report(y_true, y_pred, target_names=AAMI_LABELS))
 
     return y_true, y_pred
