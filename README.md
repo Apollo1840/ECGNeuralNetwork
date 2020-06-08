@@ -200,3 +200,7 @@ Run this script to create the dataset
 ```shell
 $ python convert_signal_img.py
 ```
+
+
+# todo
+Rotation is not good since it is padding with zero but the image white use 1 as value.

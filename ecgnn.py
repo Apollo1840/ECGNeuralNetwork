@@ -1,6 +1,7 @@
 from utilities import result
 from ann import ann
 from cnn import cnn
+from dataset.dataset import readlist
 
 '''
     Use this script such as main
@@ -18,7 +19,8 @@ def combine_result(y1, y2, filenames, weighted=True, print_precision=True, print
         Combine the result of two prediction models
         :param y1: y_pred
         :param y2: y_pred
-        :param filenames: List[str], list of .txt files. Used to calculate the true value of test since the name of the file is the true label
+        :param filenames: List[str], list of .txt files. Used to calculate the true value of test,
+            since the name of the file is the true label
         :return:
     """
 
@@ -93,21 +95,10 @@ def convert_dataset_to_ann(test, train=None, validation=None):
     return train_ann, val_ann, test_ann
 
 
-def read_test():
-    """
-
-    :return: List[stt], list of image filename
-    """
-
-    with open(TEST_DATA_PATH, 'r') as f:
-        test = f.read().split('\n')
-    return test
-
-
 if __name__ == "__main__":
 
     """ Load test set from file """
-    test_cnn = read_test()  # List of image filename end with .png
+    test_cnn = readlist(TEST_DATA_PATH)  # List of image filename end with .png
 
     _, _, test_ann = convert_dataset_to_ann(test_cnn)  # List of signal end with .txt
 

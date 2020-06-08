@@ -1,6 +1,12 @@
 import matplotlib.pyplot as plt
 import cv2
-from .data_augmentation import cropping, cropping2
+
+import os
+import sys
+# add root of this project to sys.path
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+from dataset.data_augmentation import cropping, cropping2
 
 
 def signals_to_im(signals, directory='.'):

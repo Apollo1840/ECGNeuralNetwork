@@ -1,4 +1,4 @@
-from keras.callbacks import ModelCheckpoint
+from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 from keras.engine.saving import load_model
 from keras.layers import Conv2D, BatchNormalization, Flatten, Dense, Dropout, MaxPooling2D
 from graphics.train_val_tensorboard import TrainValTensorBoard
@@ -13,7 +13,10 @@ import random
 import cv2
 import os
 import imutils
+
 from dataset.data_augmentation import augmentated_filenames2
+from configs import AAMI_CLASSES_REDUCED as AAMI_LABELS
+from configs import AAMI2TYPE2_MAPPING_REDUCED as AAMI_LABEL_MAPPING
 
 _dataset_dir = './data/beats_img'
 _model = './trained_models/cnn_baseline.h5'
@@ -24,7 +27,7 @@ _rotate_range = 180
 _size = (64, 64)
 _batch_size = 32
 _filters = (4, 4)
-_epochs = 3
+_epochs = 12
 _n_classes = 8
 _regularizers = 0.0001
 
@@ -32,7 +35,7 @@ _probability_to_change = 0.30
 _seed = 7
 
 
-def create_model():
+def create_model(out_dim=8):
     """
         Create model
         :return:
@@ -71,7 +74,7 @@ def create_model():
     model.add(Flatten())
     model.add(Dense(512, kernel_regularizer=regularizers.l2(_regularizers), activation='relu'))
     model.add(Dropout(0.5))
-    model.add(Dense(8, activation='softmax'))
+    model.add(Dense(out_dim, activation='softmax'))
 
     model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
@@ -87,14 +90,35 @@ def load_cnn_model():
     return model
 
 
-def encode_label(file):
+def thislabel2aami(thislabel):
+    """
+
+    :param thislabel: str
+    :return: str
+    """
+    for aami_label in AAMI_LABELS:
+        if thislabel in AAMI_LABEL_MAPPING[aami_label]:
+            return aami_label
+    return None
+
+
+def encode_label(filename, label_type):
     """
         Encode the class label
-        :param file:
+        :param filename: str
+        :param label_type: str. "specific", "AAMI"
         :return:
     """
-    label = [0 for _ in range(_n_classes)]
-    label[int(LABELS.index(file[:3]))] = 1
+
+    if label_type == "AAMI":
+        label = [0 for _ in range(len(AAMI_LABELS))]
+        aami_label = thislabel2aami(filename[:3])
+        if aami_label:
+            label[int(AAMI_LABELS.index(aami_label))] = 1
+
+    else:
+        label = [0 for _ in range(len(LABELS))]
+        label[int(LABELS.index(filename[:3]))] = 1
     return label
 
 
@@ -112,7 +136,8 @@ def load_dataset(files, directory,
                  batch_size, size,
                  random_crop,
                  random_rotate,
-                 flip):
+                 flip,
+                 label_type=""):
     """
         Load dataset in minibatch
         :param files: List[str], each file is xxx.png
@@ -122,6 +147,8 @@ def load_dataset(files, directory,
         :param random_crop: Bool, no effect in this case
         :return:
     """
+    if label_type == "AAMI":
+        files = valid_filenames_for_aami(files)
 
     L = len(files)
 
@@ -131,23 +158,30 @@ def load_dataset(files, directory,
         batch_end = batch_size
         while batch_start < L:
             limit = min(batch_end, L)
-            X, Y = images2array(files[batch_start:limit], size, directory, random_rotate, flip)
-            yield (X, Y)
+            X, Y = images2mldata(files[batch_start:limit],
+                                 size,
+                                 label_type,
+                                 directory,
+                                 random_rotate,
+                                 flip)
+            yield X, Y
 
             batch_start += batch_size
             batch_end += batch_size
 
 
-def images2array(files,
-                 size,
-                 directory,
-                 random_rotate,
-                 flip,
-                 encode_labels=True):
+def images2mldata(files,
+                  size,
+                  label_type,
+                  directory,
+                  random_rotate=False,
+                  flip=False,
+                  drop_none_label=True,
+                  encode_labels=True):
     """
         Convert an image to array and encode its label
 
-        :param files: str. eg. xxx.png
+        :param files: List[str]. eg. xxx.png
         :param size:
         :param directory:
         :return: image converted and its label
@@ -156,16 +190,21 @@ def images2array(files,
     images = []
     labels = []
     for file in files:
-        file_name = os.path.join(directory, file[:3], file)
-        img = image_to_array(file_name, size, random_rotate, flip)
 
         if encode_labels:
-            label = encode_label(file)
+            label = encode_label(file, label_type)
         else:
             label = LABELS.index([file[:3]])
 
-        images.append(img)
-        labels.append(label)
+        # for secure
+        if drop_none_label and sum(label) == 0:
+            continue
+
+        else:
+            file_name = os.path.join(directory, file[:3], file)
+            img = image_to_array(file_name, size, random_rotate, flip)
+            images.append(img)
+            labels.append(label)
 
     X = np.array(images)
     Y = np.array(labels)
@@ -173,10 +212,10 @@ def images2array(files,
     return X, Y
 
 
-def image_to_array(filename, size, random_rotate=True, flip=True):
+def image_to_array(filename, size, random_rotate=False, flip=False):
     """
 
-    :param filename:
+    :param filename: str
     :param size:
     :param random_rotate:
     :param flip:
@@ -187,6 +226,7 @@ def image_to_array(filename, size, random_rotate=True, flip=True):
     if random_rotate:
         if random.uniform(0, 1) < _probability_to_change:
             img = imutils.rotate(img, randint(-_rotate_range, _rotate_range))
+            # padding with what ?
     if flip:
         if random.uniform(0, 1) < _probability_to_change:
             img = cv2.flip(img, randint(-1, 1))
@@ -204,6 +244,7 @@ def training(train=None, validation=None, augmentation=True):
         Training the model
         :return:
     """
+
     model = create_model()
     if train is None and validation is None:
         train, validation, test = dataset.load_files(_dataset_dir)
@@ -211,8 +252,12 @@ def training(train=None, validation=None, augmentation=True):
     if augmentation:
         train = augmentated_filenames2(train)
 
-    callbacks_list = [ModelCheckpoint(_model, monitor='val_loss', save_best_only=True),
-                      TrainValTensorBoard(write_graph=False)]
+    callbacks_list = [ModelCheckpoint(_model, monitor='val_loss', save_best_only=False),
+                      EarlyStopping(monitor='val_loss', min_delta=0, patience=10, verbose=0, mode='auto',
+                                    baseline=None, restore_best_weights=False),
+                      ReduceLROnPlateau(monitor='val_loss', factor=0.8, patience=3, verbose=0, mode='auto')
+                      # TrainValTensorBoard(write_graph=False)
+                      ]
 
     data_gen_train = load_dataset(train, _dataset_dir,
                                   _batch_size, _size,
@@ -236,11 +281,32 @@ def training(train=None, validation=None, augmentation=True):
     return model
 
 
-def predict_model(model=None, filenames=None):
+def predict_model(model=None, filenames=None, label_type="", verbose=False):
     """
-        Predict model
-        :return:
+        model make prediction
+        :return: y_pred
     """
-    x, _ = images2array(filenames, _size, _dataset_dir, True, True, True)
-    y = model.predict(np.reshape(x, (len(filenames), _size[0], _size[1], 1)))
+
+    if verbose:
+        print("changing {} images to arrays".format(len(filenames)))
+
+    x, _ = images2mldata(filenames, _size, label_type, _dataset_dir)
+    model_accept_shape = (len(x), _size[0], _size[1], 1)
+    x = np.reshape(x, model_accept_shape)
+
+    if verbose:
+        print("predicting on {} samples".format(len(filenames)))
+
+    y = model.predict(x)
+
+    assert len(y) == len(filenames)
     return y
+
+
+def valid_filenames_for_aami(filenames):
+    valid_filenames = []
+    for filename in filenames:
+        y = encode_label(filename, label_type="AAMI")
+        if sum(y) != 0:
+            valid_filenames.append(filename)
+    return valid_filenames

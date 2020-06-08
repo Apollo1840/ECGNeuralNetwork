@@ -3,11 +3,9 @@ import random
 
 random.seed(2020)
 
-import os
+from os.path import isfile, join
 from os import listdir
-from os.path import isfile, join, dirname
-
-
+import os
 import wfdb
 import numpy as np
 import gc
@@ -16,18 +14,15 @@ from memory_profiler import profile
 import sys
 
 # add root of this project to sys.path
-
-PROJECT_FOLDER = dirname(dirname(__file__))
-print(PROJECT_FOLDER)
-sys.path.append(PROJECT_FOLDER)
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from dataset.data_transform import signal_to_im
-from uitls_path_manager import path_to_img, _directory, _dataset_dir, _preprocessed_record_ids, _dataset_ann_dir
-from configs import TYPE2_CLASSES as LABELS
-from configs import MITBIH2TYPE2_MAPPING as LABELS_MAPPING
-
+from utilities.labels import LABELS, LABELS_MAPPING
 
 _range_to_ignore = 20
+_directory = '../Data/mitbih/'
+_dataset_dir = '../Data/dataset_filtered/'
+_dataset_ann_dir = '../Data/dataset_ann/'
 _split_percentage = .70
 _split_validation_percentage = 0.70
 _split_test_percentage = 0.50
@@ -35,74 +30,141 @@ _width = 2503
 _height = 3361
 
 
+@profile
 def create_img_from_dir(
         data_dir=_directory,
         save_dir=_dataset_dir,
-        labels_mapping=LABELS_MAPPING,
-        records_wanted=None,
+        record_ids=None,
         size=(128, 128),
         id_lead=0,
         augmentation=True,
-        smoothing=True,
-        verbose=False,
-):
+        smoothing=True):
     """
     For each beat for each patient creates img apply some filters
     from _directory to _dataset_dir
 
     :param data_dir: str, ends with '/'
     :param save_dir: str, ends with '/'
-    :param records_wanted: List[int] or List[str]
     :param size: tuple of int, the img size
     :param id_lead: get which lead
     :param augmentation: Bool, create for each image another nine for each side
     :param smoothing: Bool
-    :param verbose: Bool
     """
 
     # prepare data_pathes
-    prepare_data_pathes(save_dir, split_tvt=False)
+    for label in LABELS:
+        dir = '{}/{}'.format(save_dir, label)
+        if not os.path.exists(dir):
+            os.makedirs(dir)
 
-    records = records_to_process(data_dir, records_wanted)
+    records = [f[:-4] for f in listdir(data_dir) if isfile(join(data_dir, f)) if (f.find('.dat') != -1)]
+    # records = ["101", "102", ...]
 
-    if verbose:
-        print("transforming beats to image for records:")
-        print(records)
+    random.shuffle(records)
 
     count = 0
-    for record in records:
+    for record in records[14:20]:
 
         sig, field = wfdb.rdsamp(os.path.join(data_dir, record))
         ann = wfdb.rdann(os.path.join(data_dir, record), extension='atr')
 
-        beats_indexes = beat_indices_from_annotaions(ann, labels_mapping)
+        # loop through all annotation sample to get wanted beats
+        beats_indexes = []
+        for i in range(1, len(ann.sample) - 1):
+
+            if ann.symbol[i] not in LABELS_MAPPING:
+                continue
+
+            start = ann.sample[i - 1] + _range_to_ignore
+            end = ann.sample[i + 1] - _range_to_ignore
+            label = LABELS_MAPPING[ann.symbol[i]]
+
+            beats_indexes.append((start, end, label))
 
         # loop through all beats indexes to get all beats and change it to images
         for i in tqdm.tqdm(range(len(beats_indexes))):
 
             start, end, label = beats_indexes[i]
-
-            img_path = path_to_img(save_dir, label, record[-3:], start, end)
-            if not os.path.isfile(img_path):
+            img_path = '{}/{}/{}_{}{}{}0.png'.format(save_dir, label, label, record[-3:], start, end)
+            if not os.path.exists(img_path):
                 # get beat
                 ''' Get the Q-peak intervall '''
 
                 beat = [sig[j][id_lead] for j in range(start, end)]
+
                 if smoothing:
                     beat = piecewise_aggregate_approximation(beat, paa_dim=100)
 
                 ''' Convert in gray scale and resize img '''
-                # this function will store the image
-                signal_to_im(beat,
-                             img_path=img_path,
-                             resize=size,
-                             use_cropping=augmentation)
+                # this function will store the images
+                signal_to_im(beat, img_path=img_path, resize=size, use_cropping=augmentation)
 
             gc.collect()
 
         count += 1
         print("{}/{}".format(count, len(records)))
-        addlist(record, _preprocessed_record_ids)
+
+
+def create_img_from_dir_split(
+        data_dir=_directory,
+        save_dir=_dataset_dir,
+        size=(128, 128),
+        augmentation=True,
+        smoothing=True):
+    """
+    For each beat for each patient creates img apply some filters
+    from _directory to _dataset_dir
+
+    :param data_dir: str, ends with '/'
+    :param save_dir: str, ends with '/'
+    :param size: tuple of int, the img size
+    :param augmentation: Bool, create for each image another nine for each side
+    :param smoothing: Bool
+    """
+
+    prepare_data_pathes(save_dir)
+
+    records = [f[:-4] for f in listdir(data_dir) if isfile(join(data_dir, f)) if (f.find('.dat') != -1)]
+    random.shuffle(records)
+
+    train = records[: int(len(records) * _split_percentage)]
+    # test = records[int(len(records) * _split_percentage):]
+
+    count = 0
+    for record in records:
+        if record in train:
+            filename_convention = '{}train/{}/{}_{}{}{}0.png'
+        else:
+            filename_convention = '{}validation/{}/{}_{}{}{}0.png'
+
+        sig, _ = wfdb.rdsamp(os.path.join(data_dir, record))
+        ann = wfdb.rdann(os.path.join(data_dir, record), extension='atr')
+
+        # loop through all beats
+        for i in tqdm.tqdm(range(1, len(ann.sample) - 1)):
+
+            if ann.symbol[i] not in LABELS_MAPPING:
+                continue
+
+            # get beat
+            ''' Get the Q-peak intervall '''
+            id_lead = 0
+            start = ann.sample[i - 1] + _range_to_ignore
+            end = ann.sample[i + 1] - _range_to_ignore
+            beat = [sig[j][id_lead] for j in range(start, end)]
+
+            if smoothing:
+                beat = piecewise_aggregate_approximation(beat, paa_dim=100)
+
+            # get filename by label
+            label = LABELS_MAPPING[ann.symbol[i]]
+            filename = filename_convention.format(save_dir, label, label, record[-3:], start, end)
+
+            ''' Convert in gray scale and resize img '''
+            signal_to_im(beat, filename, resize=size, use_cropping=augmentation)
+
+        count += 1
+        print("{}/{}".format(count, len(records)))
 
 
 def create_txt_from_dir(
@@ -152,6 +214,17 @@ def create_txt_from_dir(
 
         count += 1
         print("{}/{}".format(count, len(records)))
+
+
+def prepare_data_pathes(save_dir):
+    for label in LABELS:
+        dir = '{}train/{}'.format(save_dir, label)
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+
+        dir = '{}validation/{}'.format(save_dir, label)
+        if not os.path.exists(dir):
+            os.makedirs(dir)
 
 
 def piecewise_aggregate_approximation(vector, paa_dim: int):
@@ -287,25 +360,10 @@ def writelist(list_a, filename):
             f.write(line + "\n")
 
 
-def addlist(item, filename):
-    """
-    do not use writelines(), it is not good.
-
-    :param item: str
-    :param filename:
-    :return:
-    """
-    with open(filename, "a") as f:
-        f.write(item + "\n")
-
-
 def readlist(filename):
-    if os.path.isfile(filename):
-        with open(filename, "r") as f:
-            lines = f.readlines()
-        return [line.strip() for line in lines]
-    else:
-        return []
+    with open(filename, "r") as f:
+        lines = f.readlines()
+    return [line.strip() for line in lines]
 
 
 def load_data(data_filename,
@@ -332,59 +390,6 @@ def load_data(data_filename,
         data = make_data_func(data_filename, verbose=verbose)
         save_data_func(data_filename, data)
     return data
-
-
-def prepare_data_pathes(save_dir, split_tvt=True):
-
-    if split_tvt:
-        for label in LABELS:
-            dir = '{}train/{}'.format(save_dir, label)
-            if not os.path.exists(dir):
-                os.makedirs(dir)
-
-            dir = '{}valid/{}'.format(save_dir, label)
-            if not os.path.exists(dir):
-                os.makedirs(dir)
-
-            dir = '{}test/{}'.format(save_dir, label)
-            if not os.path.exists(dir):
-                os.makedirs(dir)
-    else:
-        for label in LABELS:
-            dir = '{}/{}'.format(save_dir, label)
-            if not os.path.exists(dir):
-                os.makedirs(dir)
-
-
-def records_to_process(data_dir, records_wanted=None):
-    records = [f[:-4] for f in listdir(data_dir) if isfile(join(data_dir, f)) if (f.find('.dat') != -1)]
-    # records = ["101", "102", ...]
-
-    records_preprocesed = readlist(_preprocessed_record_ids)
-    records = [r for r in records if r not in records_preprocesed]
-
-    if records_wanted:
-        records_wanted = [str(r) for r in records_wanted]
-        records = [r for r in records if r in records_wanted]
-
-    return records
-
-
-def beat_indices_from_annotaions(anntations, labels_mapping):
-    # loop through all annotation sample to get wanted beats
-
-    beats_indexes = []
-    for i in range(1, len(anntations.sample) - 1):
-
-        if anntations.symbol[i] not in labels_mapping:
-            continue
-
-        start = anntations.sample[i - 1] + _range_to_ignore
-        end = anntations.sample[i + 1] - _range_to_ignore
-        label = labels_mapping[anntations.symbol[i]]
-
-        beats_indexes.append((start, end, label))
-    return beats_indexes
 
 
 if __name__ == "__main__":
