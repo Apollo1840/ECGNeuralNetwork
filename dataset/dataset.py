@@ -160,7 +160,7 @@ def piecewise_aggregate_approximation(vector, paa_dim: int):
     Transform signal in a vector of size M
 
     :param vector: signal
-    :param paa_dim: the size of average window
+    :param paa_dim: wanted dimension
     :return: np.array: smoothed signal
     '''
 
