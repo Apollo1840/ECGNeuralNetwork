@@ -25,11 +25,12 @@ from dataset.data_transform import signal_to_im
 from uitls_path_manager import path_to_img, _directory, _dataset_dir, _preprocessed_record_ids, _dataset_ann_dir
 from configs import TYPE2_CLASSES as LABELS
 from configs import MITBIH2TYPE2_MAPPING as LABELS_MAPPING
+from configs import DS_bank
 
 
 _range_to_ignore = 20
 _split_percentage = .70
-_split_validation_percentage = 0.70
+_split_validation_percentage = 0.80
 _split_test_percentage = 0.50
 _width = 2503
 _height = 3361
@@ -110,7 +111,7 @@ def create_txt_from_dir(
         save_dir=_dataset_ann_dir,
         smoothing=True):
 
-    prepare_data_pathes(save_dir)
+    prepare_data_pathes(save_dir, LABELS)
 
     records = [f[:-4] for f in listdir(data_dir) if isfile(join(data_dir, f)) if (f.find('.dat') != -1)]
     random.shuffle(records)
@@ -204,6 +205,35 @@ def images_by_classes(directory, shuffle=True, verbose=False):
     return classes_dict
 
 
+def images_by_record(directory, shuffle=True, verbose=False):
+
+    record_dict = {}
+
+    for cls in LABELS:
+        imgs = [f for f in listdir(os.path.join(directory, cls)) if cls in f if f[-5] == '0']
+        # it is very import to keep f[-5] to be zero,
+        # so that data augmentation will not cause overlap between train and test
+        # eg. classes_dict["NOR"] = ["NOR10.png", "NOR20.png", ...]
+
+        record_ids = [record_id_from_filename(img) for img in imgs]
+
+        for record_id, img in zip(record_ids, imgs):
+            if record_id in record_dict:
+                record_dict[record_id].append(img)
+            else:
+                record_dict[record_id] = [img]
+
+    if shuffle:
+        for record_id in record_dict:
+            random.shuffle(record_dict[record_id])
+
+    if verbose:
+        for key, value in record_dict.items():
+            print("{}: {}\t".format(key, len(value)))
+
+    return record_dict
+
+
 def load_files(directory, keep_ratio=1, verbose=False):
     """
     Load each name file in the directory
@@ -266,6 +296,74 @@ def load_files(directory, keep_ratio=1, verbose=False):
                                    save_data_func=save_tvt,
                                    load_data_func=load_tvt,
                                    data_exist_func=exist_tvt,
+                                   verbose=verbose)
+
+    train = train[:int(len(train) * keep_ratio)]
+    valid = valid[:int(len(valid) * keep_ratio)]
+    test = test[:int(len(test) * keep_ratio)]
+    return train, valid, test
+
+
+def load_files_cross_patient(directory, keep_ratio=1, verbose=False):
+    """
+    Load each name file in the directory
+
+    :param directory: str.
+    :param keep_ratio: float, 0 to 1
+    :param verbose: Bool
+    :return: 3 List[str]: each of them is a list of filenames, eg. xxx.png or xxx.txt
+    """
+
+    def make_ds_tvt(directory, verbose=False):
+        t_and_v = []
+        test = []
+
+        # use classes_dict to make sure class distribution are equal.
+        record_dict = images_by_record(directory, verbose=verbose)
+
+        for record in record_dict:
+            if record in DS_bank["normal"]["DS1"]:
+                t_and_v.extend(record_dict[record])
+            elif record in DS_bank["normal"]["DS2"]:
+                test.extend(record_dict[record])
+
+        train = t_and_v[:int(len(t_and_v)*_split_validation_percentage)]
+        validation = t_and_v[int(len(t_and_v)*_split_validation_percentage):]
+
+        random.shuffle(train)
+        random.shuffle(validation)
+        random.shuffle(test)
+
+        variables = [train, validation, test]
+        return variables
+
+    def load_ds_tvt(directory, verbose=False):
+        if verbose:
+            print("load DS tvt from {}".format(directory))
+
+        variables = [[], [], []]
+        files = ["train_DS1.txt", "validation_DS1.txt", "test_DS2.txt"]
+        for i in range(len(files)):
+            variables[i] = readlist(os.path.join(directory, files[i]))
+        return variables
+
+    def save_ds_tvt(directory, variables):
+        files = ["train_DS1.txt", "validation_DS1.txt", "test_DS2.txt"]
+        for i in range(len(files)):
+            writelist(variables[i], os.path.join(directory, files[i]))
+
+    def exist_ds_tvt(directory):
+        files = ["train_DS1.txt", "validation_DS1.txt", "test_DS2.txt"]
+        for i in range(len(files)):
+            if not os.path.isfile(os.path.join(directory, files[i])):
+                return False
+        return True
+
+    train, valid, test = load_data(directory,
+                                   make_data_func=make_ds_tvt,
+                                   save_data_func=save_ds_tvt,
+                                   load_data_func=load_ds_tvt,
+                                   data_exist_func=exist_ds_tvt,
                                    verbose=verbose)
 
     train = train[:int(len(train) * keep_ratio)]
@@ -385,6 +483,10 @@ def beat_indices_from_annotaions(anntations, labels_mapping):
 
         beats_indexes.append((start, end, label))
     return beats_indexes
+
+
+def record_id_from_filename(imgname):
+    return int(imgname[4:7])
 
 
 if __name__ == "__main__":

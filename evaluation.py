@@ -5,7 +5,7 @@ from utilities import result
 from cnn.cnn import predict_model, valid_filenames_for_aami
 from dataset.dataset import readlist
 
-from configs import TEST_DATA_PATH
+from configs import TEST_DATA_PATH, TEST_DATA_PATH_CROSS
 from configs import AAMI_CLASSES_REDUCED as AAMI_LABELS
 from configs import AAMI2TYPE2_MAPPING_REDUCED as AAMI_LABEL_MAPPING
 from configs import TYPE2_CLASSES as LABELS
@@ -37,7 +37,7 @@ def thislabel2onehot(this_label):
     return index2onehot(LABELS.index(this_label), len(LABELS))
 
 
-def evaluate_cnn(model, label_type, keep_ratio=1, verbose=True):
+def evaluate_cnn(model, label_type, cross_patient=False, keep_ratio=1, verbose=True):
     """
 
     :param model:
@@ -46,7 +46,11 @@ def evaluate_cnn(model, label_type, keep_ratio=1, verbose=True):
     :return:
     """
 
-    test_cnn_all = readlist(TEST_DATA_PATH)
+    if cross_patient:
+        test_cnn_all = readlist(TEST_DATA_PATH_CROSS)
+    else:
+        test_cnn_all = readlist(TEST_DATA_PATH)
+    
     test_cnn_clip = test_cnn_all[:int(len(test_cnn_all)*keep_ratio)]
 
     if label_type == "AAMI":
@@ -67,7 +71,8 @@ def evaluate_cnn(model, label_type, keep_ratio=1, verbose=True):
     print("recall: ", recall)
     print("f1score: ", fscore)
 
-    print("marco f1 score", f1_score(y_true, y_pred, average='macro'))
+    print("macro f1 score", f1_score(y_true, y_pred, average='macro'))
+    print("micro f1 score", f1_score(y_true, y_pred, average='micro'))
     print(classification_report(y_true, y_pred, target_names=AAMI_LABELS))
 
     return y_true, y_pred
